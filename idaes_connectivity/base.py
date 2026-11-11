@@ -473,6 +473,23 @@ class Connectivity:
                 stream_set = [comp]
             # Loop through list of streams
             for comp_stream in stream_set:
+                if comp_stream.source is None or comp_stream.dest is None:
+                    if comp_stream.source is None and comp_stream.dest is None:
+                        _log.warning(
+                            f"Skipping stream {comp_stream.name} "
+                            "with missing source and destination."
+                        )
+                    elif comp_stream.source is None:
+                        _log.warning(
+                            f"Skipping stream {comp_stream.name} "
+                            "with missing source."
+                        )
+                    elif comp_stream.dest is None:
+                        _log.warning(
+                            f"Skipping stream {comp_stream.name} "
+                            "with missing destination."
+                        )
+                    continue
                 stream_name = comp_stream.name
                 src, dst = (
                     comp_stream.source.parent_block(),
