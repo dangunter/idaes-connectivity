@@ -50,8 +50,8 @@ except ImportError as err:
     warnings.warn(f"Could not import pyomo: {err}")
 
 # package
-from idaes_connectivity.util import IdaesPaths, UnitIcon, FileServer
-from idaes_connectivity.const import Direction, ComponentNames, DEFAULT_IMAGE_DIR
+from idaes_connectivity.const import Direction, DEFAULT_IMAGE_DIR
+from idaes_connectivity.mermaid_icons import Icons
 
 __author__ = "Dan Gunter (LBNL)"
 
@@ -783,14 +783,14 @@ class Mermaid(Formatter):
     def __init__(
         self,
         connectivity: Connectivity,
-        component_images=False,
-        component_image_dir=None,
+        icons: bool = True,
         **kwargs,
     ):
         """Constructor. See class `defaults` for default values.
 
         Args:
             connectivity (Connectivity): Model connectivity
+            icons: If True, use icons for any recognized unit classes
             kwargs (dict): See `Mermaid.defaults` for keywords
 
         Raises:
@@ -807,35 +807,11 @@ class Mermaid(Formatter):
         if self._stream_values:
             self._streams_with_values = set()
 
-        # If component images are desired, start image server, etc.
-        if component_images:
-            self._images = self._start_image_server(component_image_dir)
-            if self._images:
-                self._comp_names = ComponentNames()
-                self._host = self._image_server.HOST
-                self._port = self._image_server.port
+        if icons:
+            self._icons = Icons()
+            self._icon_height = 50
         else:
-            self._images = False
-
-    def _start_image_server(self, component_image_dir: Path | str) -> bool:
-        started = False
-
-        self._image_server = FileServer()
-
-        if component_image_dir is None:
-            image_dir = DEFAULT_IMAGE_DIR
-        else:
-            image_dir = Path(component_image_dir)
-
-        try:
-            self._image_server.start(file_dir=image_dir)
-            started = True
-        except (FileExistsError, ValueError) as err:
-            _log.error(
-                f"Could not start image server (unit images will not be shown): {err}"
-            )
-
-        return started
+            self._icons = None
 
     def _repr_markdown_(self):
         """Display using Markdown in a Jupyter Notebook."""
@@ -877,25 +853,14 @@ class Mermaid(Formatter):
         #   4) key/value but no values, like (1)
         for name, abbr in self._conn.units.items():
             node_name, node_class = self._get_node_info(name)
-            if self._images and (img_url := self._get_url(node_class)):
-                # image. images don't add key=value pairs (yet)
-                node_str = f'{abbr}@{{ img: "{img_url}", label: {node_name}, h: 50, constraint: "on"}}'
-            else:
-                # plain or key/value
-                nclass = f"::{node_class}" if self._unit_class else ""
-                node_str_base = f"{abbr}{nclass}[{node_name}"
-                if self._unit_values:
-                    # key/value
-                    if values := self._conn.unit_values[name]:
-                        # key/value with values
-                        values_str = "\n".join((f"{k}={v}" for k, v in values.items()))
-                        node_str = f"{node_str_base}\n{values_str}]"
-                    else:
-                        # key/value without values
-                        node_str = node_str_base + "]"
+            if self._icons:
+                icon_name = self._icons.get_icon_for_class(node_class)
+                if icon_name:
+                    node_str = self._node_icon_def(abbr, node_name, icon_name)
                 else:
-                    # plain
-                    node_str = node_str_base + "]"
+                    node_str = self._node_generic_def(abbr, node_name, node_class)
+            else:
+                node_str = self._node_generic_def(abbr, node_name, node_class)
             outfile.write(f"{i}{node_str}\n")
         # Streams
         for abbr, s in self._get_mermaid_streams():
@@ -904,6 +869,28 @@ class Mermaid(Formatter):
         # Connections
         for s in connections:
             outfile.write(f"{i}{s}\n")
+
+    def _node_generic_def(self, abbr: str, name: str, clazz: str):
+        # plain or key/value
+        nclass = f"::{clazz}" if self._unit_class else ""
+        node_str_base = f"{abbr}{nclass}[{name}"
+        if self._unit_values:
+            # key/value
+            if values := self._conn.unit_values[name]:
+                # key/value with values
+                values_str = "\n".join((f"{k}={v}" for k, v in values.items()))
+                node_str = f"{node_str_base}\n{values_str}]"
+            else:
+                # key/value without values
+                node_str = node_str_base + "]"
+        else:
+            # plain
+            node_str = node_str_base + "]"
+        return node_str
+
+    def _node_icon_def(self, abbr: str, name: str, icon: str):
+        s = f'{abbr}@{{icon: "idaes:{icon}", form: "square", label: "{name}", pos: "B", h: {self._icon_height}}}'
+        return s
 
     def _get_url(self, node_class):
         return (  # returns None if filename=None
@@ -961,30 +948,10 @@ class Mermaid(Formatter):
     def _clean_stream_label(value: str) -> str:
         return '"' + value + '"'
 
-    def stop_image_server(self):
-        """Stop the image server, if it was started."""
-        if self._images:
-            self._image_server.kill_all()
-            self._images = False
-
-    # XXXX
-    # OLD method to take _outlet and _feed suffixes off stream names.
-    # This looks better, but means the names no longer match what is in
-    # the model, which is confusing. So we don't do it for now.
-    # XXXX
-    # @staticmethod
-    # def _clean_stream_label(label):
-    #     if label.endswith("_outlet"):
-    #         label = label[:-7]
-    #     elif label.endswith("_feed"):
-    #         label = label[:-5]
-    #     label = label.replace("_", " ")
-    #     return label
-
 
 class MermaidImage(Formatter):
     """Formatter that calls mermaid-cli command line program (mmdc) in order to
-    generate the diagram as an aimage file.
+    generate the diagram as an image file.
 
     For more information about mermaid-cli, see https://github.com/mermaid-js/mermaid-cli
 
@@ -1050,147 +1017,3 @@ class MermaidImage(Formatter):
     def find_mmdc() -> str | None:
         """Find CLI program for mermaid-cli (mmdc)."""
         return shutil.which("mmdc")
-
-
-class D2(Formatter):
-    """Create output in Terraform D2 syntax.
-
-    See https://d2lang.com
-    """
-
-    #: Default values.
-    #  Use these values if no value is given to the
-    #: corresponding keyword in the constructor.
-    #: For example::
-    #:
-    #:   D2.defaults.update(dict(stream_labels=True, stream_values=True))
-    #:
-    #: - direction (str): Diagram direction
-    #: - stream_labels (bool): If true, add stream labels
-    #: - stream_values (bool): If True, show stream values
-    #: - unit_values (bool): If True, show unit values
-    #: - unit_class (bool): If True, include name of unit's class in its name
-    #: - indent (str): Indent (spaces) in output text
-
-    defaults = {
-        "direction": "LR",
-        "stream_labels": False,
-        "stream_values": False,
-        "unit_values": False,
-        "unit_class": False,
-    }
-
-    def __init__(
-        self,
-        connectivity: Connectivity,
-        **kwargs,
-    ):
-        """Constructor.
-
-        Args:
-            connectivity (Connectivity): Model connectivity
-            kwargs (dict): See `D2.defaults` for keywords
-
-        Raises:
-            ValueError: Invalid direction.
-        """
-        super().__init__(connectivity, **kwargs)
-        self._use_defaults(kwargs)
-        self._stream_labels = kwargs["stream_labels"]
-        self._stream_values = kwargs["stream_values"]
-        self._unit_values = kwargs["unit_values"]
-        self._unit_class = kwargs["unit_class"]
-        self._direction = self._parse_direction(kwargs["direction"])
-
-    STREAM_VALUE_CLASS = (
-        "{style: {font-color: '#666'; stroke: '#ccc'; fill: 'white'; border-radius: 8}}"
-    )
-
-    def write(self, output_file: Union[str, TextIO, None]) -> Optional[str]:
-        """Write D2 text description."""
-        unit_icon = UnitIcon(IdaesPaths.icons())
-        feed_num, sink_num = 1, 1
-        f = self._get_output_stream(output_file)
-        d2_dir = "right" if self._direction == Direction.RIGHT else "down"
-        f.write(f"direction: {d2_dir}\n")
-        if self._stream_values or self._unit_values:
-            f.write("classes:{\n")
-            if self._stream_values:
-                f.write(f"  stream_value: {self.STREAM_VALUE_CLASS}\n")
-            f.write("}\n")
-        for unit_name, unit_abbr in self._conn.units.items():
-            unit_type = self._conn.get_unit_class(unit_name)
-            if self._unit_class:
-                unit_str = f"{unit_name}::{unit_type}"
-            else:
-                unit_str = unit_name
-            if self._unit_values:
-                values_to_show = self._get_unit_values(unit_name)
-                if values_to_show is None:
-                    unit_display_str = unit_str
-                else:
-                    unit_display_str = '"' + unit_str + "\\n" + values_to_show + '"'
-            else:
-                unit_display_str = unit_str
-            image_file = None if unit_type is None else unit_icon.get_icon(unit_type)
-            if image_file is None:
-                f.write(f"{unit_abbr}: {unit_display_str}\n")
-            else:
-                f.write(
-                    f"{unit_abbr}: {unit_display_str} {{\n"
-                    f"  shape: image\n"
-                    f"  icon: {image_file}\n"
-                    f"}}\n"
-                )
-        stream_rmap = {v: k for k, v in self._conn.streams.items()}
-        for stream_abbr, conns in self._conn.connections.items():
-            stream_name = stream_rmap[stream_abbr]
-            if conns[0] is None:
-                f.write(f"f{feed_num}: Feed {feed_num}\n")
-                f.write(f"f{feed_num} -> {conns[1]}")
-                if self._stream_labels:
-                    f.write(f": {stream_name}")
-                f.write("\n")
-                feed_num += 1
-            elif conns[1] is None:
-                f.write(f"s{sink_num}: Sink {sink_num}\n")
-                f.write(f"f{sink_num} -> {conns[1]}")
-                if self._stream_labels:
-                    f.write(f"{sink_num}: {stream_name}")
-                f.write("\n")
-                sink_num += 1
-            else:
-                if self._stream_labels and not self._stream_values:
-                    f.write(f"{conns[0]} -> {conns[1]}: {stream_name}")
-                elif self._stream_values:
-                    v = self._conn.stream_values[stream_name]
-                    if v:
-                        values_text = self._format_values(v)
-                        if self._stream_labels:
-                            values_text = f"{stream_name}\\n" + values_text
-                        stream_node = f"S_{stream_name}"
-                        f.write(f'{stream_node}: "{values_text}"\n')
-                        f.write(f"{stream_node}.class: stream_value\n")
-                        f.write(f"{conns[0]} -> {stream_node} -> {conns[1]}\n")
-                    elif self._stream_labels:
-                        f.write(f"{conns[0]} -> {conns[1]}: {stream_name}")
-                    else:
-                        f.write(f"{conns[0]} -> {conns[1]}")
-                else:
-                    f.write(f"{conns[0]} -> {conns[1]}")
-                f.write("\n")
-
-        return self._write_return(f)
-
-    @staticmethod
-    def _format_values(data):
-        text_list = []
-        for k, v in data.items():
-            text_list.append(f"{k} = {v}")
-        return "\\n".join(text_list)
-
-    def _get_unit_values(self, unit_name):
-        values = self._conn.unit_values[unit_name]
-        if not values:
-            return None
-        return "\\n".join((f"{k} = {v}" for k, v in values.items()))
