@@ -50,7 +50,7 @@ except ImportError as err:
     warnings.warn(f"Could not import pyomo: {err}")
 
 # package
-from idaes_connectivity.const import Direction, DEFAULT_IMAGE_DIR
+from idaes_connectivity.const import Direction
 from idaes_connectivity.mermaid_icons import Icons
 
 __author__ = "Dan Gunter (LBNL)"
@@ -474,6 +474,8 @@ class Connectivity:
             # Loop through list of streams
             for comp_stream in stream_set:
                 stream_name = comp_stream.name
+                if comp_stream.source is None or comp_stream.dest is None:
+                    continue
                 src, dst = (
                     comp_stream.source.parent_block(),
                     comp_stream.dest.parent_block(),
@@ -832,6 +834,7 @@ class Mermaid(Formatter):
         if self._stream_values:
             outfile.write(
                 f"{i}classDef streamval fill:#fff,stroke:#666,stroke-width:1px,font-size:80%;\n"
+                f"classDef idaesUnit fill:#cdf;\n"  # for icon units
             )
             for name, values in self._conn.stream_values.items():
                 if values:
@@ -851,12 +854,14 @@ class Mermaid(Formatter):
         #   2) image = abbr@{ img: url, ... }
         #   3) key/value = abbr["name"\n key="value:\n...]
         #   4) key/value but no values, like (1)
+        icon_nodes = []
         for name, abbr in self._conn.units.items():
             node_name, node_class = self._get_node_info(name)
             if self._icons:
                 icon_name = self._icons.get_icon_for_class(node_class)
                 if icon_name:
                     node_str = self._node_icon_def(abbr, node_name, icon_name)
+                    icon_nodes.append(abbr)
                 else:
                     node_str = self._node_generic_def(abbr, node_name, node_class)
             else:
@@ -869,6 +874,11 @@ class Mermaid(Formatter):
         # Connections
         for s in connections:
             outfile.write(f"{i}{s}\n")
+        # Styling
+        if icon_nodes:
+            outfile.write("classDef idaesUnit fill:#cdf;\n")
+            node_list = ",".join(icon_nodes)
+            outfile.write(f"class {node_list} idaesUnit;\n")
 
     def _node_generic_def(self, abbr: str, name: str, clazz: str):
         # plain or key/value
@@ -889,7 +899,7 @@ class Mermaid(Formatter):
         return node_str
 
     def _node_icon_def(self, abbr: str, name: str, icon: str):
-        s = f'{abbr}@{{icon: "idaes:{icon}", form: "square", label: "{name}", pos: "B", h: {self._icon_height}}}'
+        s = f'{abbr}@{{icon: "idaes:{icon}", form: "square", label: {name}, pos: "B", h: {self._icon_height}}}'
         return s
 
     def _get_url(self, node_class):
@@ -1017,3 +1027,39 @@ class MermaidImage(Formatter):
     def find_mmdc() -> str | None:
         """Find CLI program for mermaid-cli (mmdc)."""
         return shutil.which("mmdc")
+
+
+class MermaidHtml(Formatter):
+    def __init__(self, conn, **mmd_opt):
+        self._mmd = Mermaid(conn, **mmd_opt)
+
+    def write(self, output_file):
+        """Write MermaidJS HTML to output file.
+
+        Args:
+            output_file (str or file-like): Output file path or file-like object
+        """
+        f = self._get_output_stream(output_file)
+        self._write_html(f)
+
+    def _write_html(self, f):
+        """Write MermaidJS HTML to file-like object.
+
+        Args:
+            f (file-like): Output file-like object
+        """
+        if _log.isEnabledFor(logging.DEBUG):
+            filename = f.name if hasattr(f, "name") else str(f)
+            _log.debug(f"_begin_ write MermaidJS HTML to '{filename}'")
+        f.write("<!DOCTYPE html>\n")
+        f.write("<html>\n<head>\n")
+        f.write(
+            "<script src='https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js'></script>\n"
+        )
+        f.write("</head>\n<body>\n")
+        f.write("<div class='mermaid'>\n")
+        f.write(self._mmd.write(None))
+        f.write("\n</div>\n")
+        f.write("</body>\n</html>\n")
+        if _log.isEnabledFor(logging.DEBUG):
+            _log.debug(f"_end_ write MermaidJS HTML to '{filename}'")

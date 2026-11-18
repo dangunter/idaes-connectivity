@@ -2,6 +2,10 @@
 Icons for mermaid diagrams
 """
 
+import logging
+
+_log = logging.getLogger(__name__)
+
 
 class Icons:
     """
@@ -12,7 +16,7 @@ class Icons:
     suffix_map = {
         "Feed": "feed",
         "Flash": "flash",
-        "Heater": "heater",
+        "Heater": "heater-1",
         "Mixer": "mixer",
         "HeatExchanger": "heat-exchanger-1",
     }
@@ -20,13 +24,18 @@ class Icons:
     def __init__(self):
         self._smap = self.suffix_map
 
-    def get_icon_for_class(self, class_name: str) -> str | None:
+    def get_icon_for_class(self, comp: str | object) -> str | None:
         """Get name of the IDAES icon for a given component class
         name.
 
         Returns: name, or None if no match is found
         """
+        try:
+            class_name = comp.local_name
+        except AttributeError:
+            class_name = str(comp)
         for k, v in self._smap.items():
             if class_name.endswith(k):
                 return v
+        _log.debug("No icon found for class '{class_name}': display with generic node")
         return None
