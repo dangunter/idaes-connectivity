@@ -863,9 +863,13 @@ class Mermaid(Formatter):
                     node_str = self._node_icon_def(abbr, node_name, icon_name)
                     icon_nodes.append(abbr)
                 else:
-                    node_str = self._node_generic_def(abbr, node_name, node_class)
+                    node_str = self._node_generic_def(
+                        abbr, node_name, node_class, unit_name=name
+                    )
             else:
-                node_str = self._node_generic_def(abbr, node_name, node_class)
+                node_str = self._node_generic_def(
+                    abbr, node_name, node_class, unit_name=name
+                )
             outfile.write(f"{i}{node_str}\n")
         # Streams
         for abbr, s in self._get_mermaid_streams():
@@ -880,13 +884,15 @@ class Mermaid(Formatter):
             node_list = ",".join(icon_nodes)
             outfile.write(f"class {node_list} idaesUnit;\n")
 
-    def _node_generic_def(self, abbr: str, name: str, clazz: str):
+    def _node_generic_def(
+        self, abbr: str, name: str, clazz: str, unit_name: str
+    ):
         # plain or key/value
         nclass = f"::{clazz}" if self._unit_class else ""
         node_str_base = f"{abbr}{nclass}[{name}"
         if self._unit_values:
             # key/value
-            if values := self._conn.unit_values[name]:
+            if values := self._conn.unit_values[unit_name]:
                 # key/value with values
                 values_str = "\n".join((f"{k}={v}" for k, v in values.items()))
                 node_str = f"{node_str_base}\n{values_str}]"

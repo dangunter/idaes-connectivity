@@ -31,6 +31,8 @@ from pandas import DataFrame
 
 _log = logging.getLogger(__name__)
 
+re_prefix_chr = "~"
+
 
 def get_stream_display_values(
     stream_table: DataFrame,
